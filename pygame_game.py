@@ -16,7 +16,7 @@ from event_system import random_event, Event as GameEvent
 # ---------------------------------------------------------------------------
 # Visual constants (inspired by Clair Obscur & Hollow Knight aesthetics)
 # ---------------------------------------------------------------------------
-SCREEN_WIDTH, SCREEN_HEIGHT = 1024, 576  # 16:9 widescreen
+SCREEN_WIDTH, SCREEN_HEIGHT = 1280, 720  # 16:9 widescreen
 FPS = 60
 CARD_W, CARD_H = 80, 110
 CARD_GAP = 20

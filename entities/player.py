@@ -32,11 +32,25 @@ class Player:
     # Card management
     # ------------------------------------------------------------------
     def draw_cards(self, count: int | None = None) -> None:
-        """Draw *count* cards; if None draws to hand_size."""
+        """Draw cards into hand.
+
+        If *count* is None we top-up the hand so that its final size equals
+        `hand_size` (+ any extras from "The Fool" jokers) instead of always
+        adding a full hand_size every time. This prevents hand overflow after
+        consecutive draw phases in the same turn cycle (issue observed in
+        Ursina/Pygame UI where hand exceeded 8 cards)."""
+
         if count is None:
             # Extra draws from "The Fool" jokers
             extra = self.jokers.count('fool') * 1  # each Fool gives +1
-            count = self.hand_size + extra
+            desired = self.hand_size + extra
+            count = max(0, desired - len(self.hand))
+            if count == 0:
+                return  # already full
+
+        if count <= 0:
+            return
+
         drawn = self.deck.draw(count)
         self.hand.extend(drawn)
         print(f"Player drew {len(drawn)} cards. Hand now: {self.hand}")
@@ -74,8 +88,25 @@ class Player:
             else:
                 mult = hand_multiplier(hand_type)
         else:
-            hand_type = "Strike"
-            mult = 1
+            # Detect partial combinations for 2–4 card selections
+            values = [c.value for c in selected]
+            rank_counts: dict[int, int] = {}
+            for v in values:
+                rank_counts[v] = rank_counts.get(v, 0) + 1
+            counts = sorted(rank_counts.values(), reverse=True)
+
+            if counts == [4]:
+                hand_type = "Four of a Kind"
+            elif counts == [3, 1]:
+                hand_type = "Three of a Kind"
+            elif counts == [2, 2]:
+                hand_type = "Two Pair"
+            elif counts == [2, 1] or counts == [2]:
+                hand_type = "Pair"
+            else:
+                hand_type = "Strike"
+
+            mult = HAND_MULTIPLIERS.get(hand_type, 1)
 
         base_damage = sum(card.value for card in selected) * mult
         total_damage = apply_jokers(selected, base_damage, hand_type, self.jokers)
