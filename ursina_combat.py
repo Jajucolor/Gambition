@@ -43,6 +43,7 @@ class CombatUI(Entity):
         self.lock_world()
         self._setup_scene_models()
         self._setup_ui()
+        self._setup_action_panel()
         self.start_player_turn()
 
     # ------------------------------------------------------------------
@@ -61,8 +62,8 @@ class CombatUI(Entity):
     def _setup_scene_models(self):
         self.player_model = Entity(model='cube', color=cast(Any, color.azure), position=(-2, 0.75, 4), scale=1.5)
         self.enemy_model = Entity(model='cube', color=cast(Any, color.red), position=(2, 0.75, 4), scale=1.5)
-        camera.position = (0, 3, 7)
-        camera.look_at(Vec3(0, 1, 4))
+        camera.position = (-5, 1, 0.5)
+        camera.look_at(Vec3(-4, 1, 1))
 
     # ------------------------------------------------------------------
     # UI
@@ -77,6 +78,7 @@ class CombatUI(Entity):
         self.txt_jokers = Text(parent=self.ui_root, x=-0.48, y=0.31, scale=1, origin=(0, 0))
         self.txt_last = Text(parent=self.ui_root, x=-0.48, y=0.24, scale=1, origin=(0, 0))
 
+        # Update HUD
         self._update_stats()
 
     def _refresh_hand_ui(self):
@@ -114,16 +116,32 @@ class CombatUI(Entity):
             destroy(b)
         self.action_buttons.clear()
 
-        def _mk(label: str, ox: float, cb):
-            b = Button(parent=self.ui_root, text=label, position=(ox, BUTTON_Y), scale=.1)
+    # ------------------------------------------------------------------
+    # Action panel
+    # ------------------------------------------------------------------
+    def _setup_action_panel(self):
+        """Panel with Items / Skills / Attack / Discard next to player."""
+        self.action_panel = Entity(parent=camera.ui)
+
+        start_y = -0.05
+        spacing = -0.12
+
+        def _btn(text, order, cb):
+            y = start_y + order * spacing
+            b = Button(parent=self.action_panel, text=text, position=(-0.8, y), scale=(0.18, 0.08))
             b.on_click = cb
-            self.action_buttons.append(b)
 
-        _mk('[A] Attack', -.3, self.attack_selected)
-        _mk('[D] Discard', 0, self.discard_selected)
-        _mk('[E] End Turn', .3, self.end_turn)
+        # Items and Skills stubs
+        _btn('Items', 0, self.use_item)
+        _btn('Skills', 1, self.use_skill)
+        _btn('Attack', 2, self.attack_selected)
+        _btn('Discard', 3, self.discard_selected)
 
-        self._update_stats()
+    def use_item(self):
+        print('TODO: implement item usage')
+
+    def use_skill(self):
+        print('TODO: implement skills')
 
     # ------------------------------------------------------------------
     # Turn flow

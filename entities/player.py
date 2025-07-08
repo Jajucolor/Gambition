@@ -18,7 +18,7 @@ class Player:
         bonus = meta.get('permanent_hp_bonus', 0)
         self.max_hp: int = 100 + bonus
         self.hp: int = self.max_hp
-        self.gold: int = 0
+        self.gold: int = 20
 
         self.deck: Deck = Deck()
         self.discard_pile: List[Card] = []

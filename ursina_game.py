@@ -37,7 +37,7 @@ def setup_world():
     player_stats.add_joker('joker')
 
     # Player entity (visual)
-    player = FirstPersonController(model='cube', color=color.azure, scale_y=2, collider='box')
+    player = FirstPersonController(model='cube', color=color.azure, collider='box')
     camera.z = -5
     player.speed = 6
 
@@ -127,12 +127,12 @@ def setup_world():
                 def _combat_done():
                     state['combat_ui'] = None
                     enemy.disable()  # ensure enemy stays gone
-                    enemies.remove(enemy)
+                enemies.remove(enemy)
 
-                    # Reward coins
-                    reward = random.randint(8, 15)
-                    player_stats.gold += reward
-                    print(f"You earned {reward} gold!")
+                # Reward coins
+                reward = random.randint(8, 15)
+                player_stats.gold += reward
+                print(f"You earned {reward} gold!")
 
                 state['combat_ui'] = CombatUI(world_player=player, player_stats=player_stats, on_finish=_combat_done)
                 break
@@ -175,11 +175,12 @@ def setup_world():
                 def _click(btn=btn):
                     if btn.offer.recruit(player_stats):
                         offers.remove(btn.offer)
+                        hud_gold.text = f"Gold: {player_stats.gold}"
                         refresh()
                 btn.on_click = _click
                 buttons.append(btn)
 
-            leave = Button(parent=ui_root, text="Leave (Esc)", position=(0.3, -0.4), scale=(0.2,0.08))
+            leave = Button(parent=ui_root, text="Leave", position=(0.3, -0.4), scale=(0.2,0.08))
             leave.on_click = close_guild
             buttons.append(leave)
 
@@ -216,6 +217,7 @@ def setup_world():
             btn = Button(parent=ui_root, text=text_choice, position=(-0.25, start_y - idx*0.12), scale=(0.5,0.08))
             def _click(act=action):
                 act(player_stats)
+                hud_gold.text = f"Gold: {player_stats.gold}"
                 close_event()
             btn.on_click = _click
             btns.append(btn)
