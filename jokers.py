@@ -74,7 +74,7 @@ JOKER_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         'effect': lambda hand, dmg, ht: dmg,  # active ability
     },
     'business_card': {
-        'name': 'The Business Card',
+        'name': 'The Businessman',
         'description': 'Single-use: triples final damage of a hand.',
         'effect': lambda hand, dmg, ht: dmg * 3,
         'single_use': True,

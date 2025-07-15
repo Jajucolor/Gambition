@@ -28,6 +28,9 @@ class Player:
         # Jokers held represented by their type key (matching jokers.JOKER_DEFINITIONS)
         self.jokers: List[str] = []
 
+        # Inventory of single-use Tarot cards or other consumables
+        self.items: List[object] = []  # use object to avoid import cycle for now
+
     # ------------------------------------------------------------------
     # Card management
     # ------------------------------------------------------------------
@@ -129,8 +132,27 @@ class Player:
         print(f"Player took {dmg} damage. HP {self.hp}/{self.max_hp}")
 
     def add_joker(self, jtype: str) -> None:
+        if len(self.jokers) >= 5:
+            print("Cannot recruit more companions - maximum of 5 companions allowed!")
+            return
         self.jokers.append(jtype)
-        print(f"Acquired joker: {jtype}")
+        print(f"Acquired companion: {jtype}")
+
+    def remove_joker(self, jtype: str) -> bool:
+        """Remove a companion from the player's collection. Returns True if successful."""
+        if jtype in self.jokers:
+            self.jokers.remove(jtype)
+            print(f"Farewelled companion: {jtype}")
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Item management
+    # ------------------------------------------------------------------
+    def add_item(self, item: object) -> None:
+        """Add a consumable (e.g., TarotCard) to inventory."""
+        self.items.append(item)
+        print(f"Obtained item: {item}")
 
     # Utility ----------------------------------------------------------------
     def is_alive(self) -> bool:

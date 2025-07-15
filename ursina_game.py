@@ -19,7 +19,9 @@ from ursina.prefabs.first_person_controller import FirstPersonController
 
 from ursina_combat import CombatUI
 from guild import generate_guild_offers, CompanionOffer
+from card_shop import generate_shop_offers, ShopOffer
 from event_system import random_event, Event as GameEvent
+from npc_system import create_random_npc, NPC
 
 from entities.player import Player
 
@@ -43,10 +45,14 @@ def setup_world():
 
     # World HUD (gold)
     hud_gold = Text(parent=camera.ui, text=f"Gold: {player_stats.gold}", x=-0.8, y=0.46, scale=1.5, origin=(0,0))
+    hud_gold.enabled = False  # only visible in inventory
 
     # Guild building
     guild_building = Entity(model='cube', color=color.dark_gray, scale=(4,4,4), position=(0,2,15), collider='box')
+    market_building = Entity(model='cube', color=color.brown, scale=(4,4,4), position=(10,2,15), collider='box')
     guild_prompt = Text(parent=camera.ui, text="Press G to enter Guild", origin=(0,0), y=0.3, x=0, enabled=False)
+    market_prompt = Text(parent=camera.ui, text="Press H to enter Market", origin=(0,0), y=0.25, x=0, enabled=False)
+    npc_prompt = Text(parent=camera.ui, text="Press T to talk", origin=(0,0), y=0.2, x=0, enabled=False)
 
     # ------------------------------------------------------------------
     # Camera orbit parameters
@@ -94,12 +100,41 @@ def setup_world():
         cube = Entity(model="cube", color=color.red, scale=1, position=pos, collider="box")
         enemies.append(cube)
 
-    state = {
+    # Fixed NPCs at specific locations
+    from npc_system import create_quest_giver, create_wandering_merchant, create_suspicious_intruder
+    
+    npcs: list[tuple[Entity, NPC]] = []
+    
+    # Village Elder (Quest Giver) - near spawn
+    elder = create_quest_giver()
+    elder_entity = Entity(model='cube', color=color.blue, scale=(2,3,2), position=(-15, 0.5, 5), collider='box')
+    npcs.append((elder_entity, elder))
+    
+    # Wandering Merchant - between guild and market
+    merchant = create_wandering_merchant()
+    merchant_entity = Entity(model='cube', color=color.green, scale=(2,3,2), position=(5, 0.5, 10), collider='box')
+    npcs.append((merchant_entity, merchant))
+    
+    # Suspicious Intruder - isolated area
+    intruder = create_suspicious_intruder()
+    intruder_entity = Entity(model='cube', color=color.red, scale=(2,3,2), position=(-8, 0.5, -12), collider='box')
+    npcs.append((intruder_entity, intruder))
+
+    from typing import Dict, Any, Optional, Callable
+    
+    state: Dict[str, Any] = {
         'combat_ui': None,
         'guild_ui': None,
         'event_ui': None,
+        'shop_ui': None,
+        'dialogue_ui': None,
+        'inv_ui': None,
         'guild_close': None,
+        'shop_close': None,
+        'dialogue_close': None,
         'event_close': None,
+        'inv_close': None,
+        'current_npc': None,
     }
 
     def update():
@@ -107,18 +142,37 @@ def setup_world():
         # move_player()
 
         # Skip movement if any overlay active
-        if state['combat_ui'] or state['guild_ui'] or state['event_ui']:
+        if state['combat_ui'] or state['guild_ui'] or state['event_ui'] or state['shop_ui'] or state['inv_ui'] or state['dialogue_ui']:
             return
 
         # Update gold HUD visibility and value
         hud_gold.text = f"Gold: {player_stats.gold}"
-        hud_gold.enabled = not (state['combat_ui'] or state['guild_ui'] or state['event_ui'])
+        hud_gold.enabled = state['inv_ui'] is not None
 
-        # Guild proximity check
+        # Guild / Market proximity check
         if distance(player.position, guild_building.position) < 5:
-            guild_prompt.enabled = not (state['combat_ui'] or state['guild_ui'] or state['event_ui'])
+            guild_prompt.enabled = not (state['combat_ui'] or state['guild_ui'] or state['event_ui'] or state['inv_ui'] or state.get('shop_ui') or state.get('dialogue_ui'))
         else:
             guild_prompt.enabled = False
+
+        if distance(player.position, market_building.position) < 5:
+            market_prompt.enabled = not (state['combat_ui'] or state['guild_ui'] or state['event_ui'] or state['inv_ui'] or state.get('shop_ui') or state.get('dialogue_ui'))
+        else:
+            market_prompt.enabled = False
+
+        # NPC proximity check
+        closest_npc = None
+        for npc_entity, npc_data in npcs:
+            if distance(player.position, npc_entity.position) < 3:
+                closest_npc = (npc_entity, npc_data)
+                break
+        
+        if closest_npc and not any(state[k] for k in ['combat_ui', 'guild_ui', 'event_ui', 'inv_ui', 'shop_ui', 'dialogue_ui']):
+            npc_prompt.enabled = True
+            state['current_npc'] = closest_npc[1]
+        else:
+            npc_prompt.enabled = False
+            state['current_npc'] = None
 
         for enemy in list(enemies):
             if distance(enemy.position, player.position) < 1.5:
@@ -134,7 +188,7 @@ def setup_world():
                 player_stats.gold += reward
                 print(f"You earned {reward} gold!")
 
-                state['combat_ui'] = CombatUI(world_player=player, player_stats=player_stats, on_finish=_combat_done)
+                state['combat_ui'] = CombatUI(world_player=player, player_stats=player_stats, on_finish=_combat_done, enemy_position=enemy.position)
                 break
 
     # Register the update function globally (Ursina auto-detects a global named `update`)
@@ -142,23 +196,45 @@ def setup_world():
 
     # Key presses for guild and event
     def input(key):
-        if state['combat_ui'] or state['guild_ui'] or state['event_ui']:
+        # First, allow ESC to close any UI overlays
+        if key == 'escape':
+            if state.get('guild_close'):
+                state['guild_close'](); return
+            if state.get('event_close'):
+                state['event_close'](); return
+            if state.get('inv_close'):
+                state['inv_close'](); return
+            if state.get('shop_close'):
+                state['shop_close'](); return
+            if state.get('dialogue_close'):
+                state['dialogue_close'](); return
+
+        # Block other keys when overlay present
+        if state['combat_ui'] or state['guild_ui'] or state['event_ui'] or state['inv_ui'] or state['shop_ui'] or state['dialogue_ui']:
             return
 
         # Only allow guild entry near building
         if key == 'g' and distance(player.position, guild_building.position) < 6:
             open_guild_ui()
-        elif key == 'v':  # e for event taken
+        elif key == 'h' and distance(player.position, market_building.position) < 6:
+            open_market_ui()
+        elif key == 't' and state.get('current_npc'):
+            open_dialogue_ui(state['current_npc'])
+        elif key == 'v':  # event overlay
             open_event_ui()
+        elif key == 'e':  # inventory
+            open_inventory_ui()
 
     # ------------------------------------------------------------------
     # Overlay helpers
     def open_guild_ui():
+        from jokers import JOKER_DEFINITIONS
         offers: list[CompanionOffer] = generate_guild_offers()
 
         ui_root = Entity(parent=camera.ui)
 
         title = Text(parent=ui_root, text="Adventurers Guild", y=.45, scale=2, origin=(0,0))
+        companion_limit_text = Text(parent=ui_root, text=f"Companions: {len(player_stats.jokers)}/5", y=.35, scale=1, origin=(0,0))
 
         buttons: list[Button] = []
 
@@ -167,20 +243,47 @@ def setup_world():
             for b in buttons:
                 destroy(b)
             buttons.clear()
-            start_y = 0.2
-            for idx, off in enumerate(offers):
-                btn = Button(parent=ui_root, text=f"{off.name} ({off.cost}g)",
-                              position=(-0.2, start_y - idx*0.12), scale=(0.4, 0.08))
-                btn.offer = off  # type: ignore
-                def _click(btn=btn):
-                    if btn.offer.recruit(player_stats):
-                        offers.remove(btn.offer)
-                        hud_gold.text = f"Gold: {player_stats.gold}"
-                        refresh()
-                btn.on_click = _click
-                buttons.append(btn)
+            
+            # Update companion count
+            companion_limit_text.text = f"Companions: {len(player_stats.jokers)}/5"
+            
+            # Show current companions section
+            if player_stats.jokers:
+                current_title = Text(parent=ui_root, text="Current Companions:", y=0.25, x=-0.4, scale=1.2, origin=(0,0))
+                buttons.append(current_title)  # Add to buttons list for cleanup
+                
+                for idx, joker_key in enumerate(player_stats.jokers):
+                    joker_name = JOKER_DEFINITIONS[joker_key]["name"]
+                    farewell_btn = Button(parent=ui_root, text=f"Farewell {joker_name}",
+                                        position=(-0.4, 0.15 - idx*0.08), scale=(0.35, 0.06))
+                    farewell_btn.joker_key = joker_key  # type: ignore
+                    def _farewell(btn=farewell_btn):
+                        if player_stats.remove_joker(btn.joker_key):
+                            refresh()
+                    farewell_btn.on_click = _farewell
+                    buttons.append(farewell_btn)
+            
+            # Show recruitment section
+            recruit_title = Text(parent=ui_root, text="Recruit New Companions:", y=0.25, x=0.2, scale=1.2, origin=(0,0))
+            buttons.append(recruit_title)  # Add to buttons list for cleanup
+            
+            if len(player_stats.jokers) >= 5:
+                full_text = Text(parent=ui_root, text="Companion limit reached!", y=0.15, x=0.2, scale=1, origin=(0,0), color=color.red)
+                buttons.append(full_text)
+            else:
+                for idx, off in enumerate(offers):
+                    btn = Button(parent=ui_root, text=f"{off.name} ({off.cost}g)",
+                                  position=(0.2, 0.15 - idx*0.08), scale=(0.35, 0.06))
+                    btn.offer = off  # type: ignore
+                    def _click(btn=btn):
+                        if btn.offer.recruit(player_stats):
+                            offers.remove(btn.offer)
+                            hud_gold.text = f"Gold: {player_stats.gold}"
+                            refresh()
+                    btn.on_click = _click
+                    buttons.append(btn)
 
-            leave = Button(parent=ui_root, text="Leave", position=(0.3, -0.4), scale=(0.2,0.08))
+            leave = Button(parent=ui_root, text="Leave", position=(0, -0.4), scale=(0.2,0.08))
             leave.on_click = close_guild
             buttons.append(leave)
 
@@ -188,9 +291,10 @@ def setup_world():
             for e in buttons:
                 destroy(e)
             destroy(title)
+            destroy(companion_limit_text)
             destroy(ui_root)
             state['guild_ui'] = None
-            state['guild_close'] = close_guild
+            state['guild_close'] = None
             # Re-lock mouse & re-enable player controls
             mouse.locked = True
             player.enabled = True
@@ -235,8 +339,269 @@ def setup_world():
 
         state['event_ui'] = ui_root
 
+    # Inventory UI ---------------------------------------------------
+    def open_inventory_ui():
+        # Ensure items list exists
+        if not hasattr(player_stats, 'items'):
+            player_stats.items = []  # type: ignore
+
+        ui_root = Entity(parent=camera.ui)
+        title = Text(parent=ui_root, text='Inventory', y=.45, scale=2, origin=(0,0))
+
+        # Tab buttons ------------------------------------------------
+        tabs = ['Items', 'Deck', 'Companions']
+        current_tab = {'name': 'Items'}
+
+        btns: list[Button] = []
+        for i, tname in enumerate(tabs):
+            bx = -0.3 + i*0.25
+            b = Button(parent=ui_root, text=tname, position=(bx, 0.32), scale=(0.22,0.08))
+            btns.append(b)
+        
+        content_parent = Entity(parent=ui_root, position=(0,0))
+
+        def clear_content():
+            for child in list(content_parent.children):
+                destroy(child)
+
+        def populate_items():
+            clear_content()
+            # Text(parent=content_parent, text=f'Gold: {player_stats.gold}', x=-0.35, y=0.18, scale=1.2, origin=(0,0))
+            Text(parent=content_parent, text='Items:', x=0, y=0.10, scale=1.2, origin=(0,0))
+            if player_stats.items:  # type: ignore
+                for idx, it in enumerate(player_stats.items):  # type: ignore
+                    Text(parent=content_parent, text=f'- {it}', x=0, y=0.05-idx*0.07, scale=1, origin=(0,0))
+            else:
+                Text(parent=content_parent, text='(none)', x=0, y=0.05, scale=1, origin=(0,0))
+
+        def populate_deck():
+            clear_content()
+            Text(parent=content_parent, text='Deck (remaining):', x=0, y=0.18, scale=1.2, origin=(0,0))
+            card_lines = []
+            row = ''
+            for idx, c in enumerate(player_stats.deck.cards):
+                row += str(c) + ', '
+                if len(row) > 60:
+                    card_lines.append(row)
+                    row = ''
+            if row:
+                card_lines.append(row)
+            for i, ln in enumerate(card_lines):
+                Text(parent=content_parent, text=ln, x=0, y=0.10-i*0.06, scale=0.8, origin=(0,0))
+
+        def populate_comp():
+            clear_content()
+            Text(parent=content_parent, text='Companions:', x=0, y=0.18, scale=1.2, origin=(0,0))
+            if player_stats.jokers:
+                for idx, jk in enumerate(player_stats.jokers):
+                    Text(parent=content_parent, text=f'- {jk}', x=0, y=0.10-idx*0.07, scale=1, origin=(0,0))
+            else:
+                Text(parent=content_parent, text='(none)', x=0, y=0.10, scale=1, origin=(0,0))
+
+        tab_funcs = {'Items': populate_items, 'Deck': populate_deck, 'Companions': populate_comp}
+
+        def set_tab(t):
+            current_tab['name'] = t
+            tab_funcs[t]()
+        
+        for b in btns:
+            b.on_click = lambda t=b.text: set_tab(t)  # capture
+
+        # initial tab
+        populate_items()
+
+        # Close hint
+        esc_txt = Text(parent=ui_root, text='Press Esc to close', y=-0.45, scale=1, origin=(0,0))
+
+        def close_inv():
+            clear_content()
+            for e in [*btns, title, esc_txt, content_parent]:
+                destroy(e)
+            destroy(ui_root)
+            state['inv_ui'] = None
+            state['inv_close'] = None
+            mouse.locked = True
+            player.enabled = True
+
+        # lock mouse, stop movement
+        mouse.locked = False
+        player.enabled = False
+
+        state['inv_ui'] = ui_root
+        state['inv_close'] = close_inv
+
     # attach input globally
     globals()['input'] = input
+
+    # Market UI ------------------------------------------------------
+    def open_market_ui():
+        offers: list[ShopOffer] = generate_shop_offers()
+
+        ui_root = Entity(parent=camera.ui)
+        title = Text(parent=ui_root, text='Card Market', y=.45, scale=2, origin=(0,0))
+
+        btns: list[Button] = []
+
+        def refresh():
+            for b in btns:
+                destroy(b)
+            btns.clear()
+            start_y = 0.25
+            for idx, off in enumerate(offers):
+                b = Button(parent=ui_root, text=f"{off.name} ({off.cost}g)", position=(-0.25, start_y-idx*0.12), scale=(0.5,0.08))
+                def _buy(btn=b, offer=off):
+                    if offer.buy(player_stats):
+                        offers.remove(offer)
+                        hud_gold.text = f"Gold: {player_stats.gold}"
+                        refresh()
+                b.on_click = _buy
+                btns.append(b)
+
+            leave = Button(parent=ui_root, text='Leave (Esc)', position=(0.3,-0.4), scale=(0.2,0.08))
+            leave.on_click = close_market
+            btns.append(leave)
+
+        def close_market():
+            for b in btns:
+                destroy(b)
+            destroy(title)
+            destroy(ui_root)
+            state['shop_ui'] = None
+            state['shop_close'] = None
+            mouse.locked = True
+            player.enabled = True
+
+        mouse.locked = False
+        player.enabled = False
+
+        refresh()
+        state['shop_ui'] = ui_root
+        state['shop_close'] = close_market
+
+    # Dialogue UI ----------------------------------------------------
+    def open_dialogue_ui(npc: NPC):
+        ui_root = Entity(parent=camera.ui)
+        
+        # Semi-transparent background
+        bg = Panel(parent=ui_root, color=color.rgba(0,0,0,180), scale=(1.5,1.5))
+        
+        # NPC name and portrait area
+        npc_name = Text(parent=ui_root, text=npc.name, y=0.42, scale=1.8, origin=(0,0))
+        
+        # Dialogue text area
+        dialogue_text = Text(parent=ui_root, text='', y=0.25, x=-0.4, scale=1.2, origin=(0,0))
+        
+        # Choice buttons container
+        choice_buttons: list[Button] = []
+        
+        def update_dialogue():
+            nonlocal choice_buttons
+            # Clear old buttons
+            for btn in choice_buttons:
+                destroy(btn)
+            choice_buttons.clear()
+            
+            # Get current dialogue
+            current = npc.get_current_dialogue()
+            # Manual word wrap for long text
+            wrapped_text = current.text
+            if len(wrapped_text) > 60:
+                words = wrapped_text.split(' ')
+                lines = []
+                current_line = ''
+                for word in words:
+                    if len(current_line + word) > 60:
+                        lines.append(current_line.strip())
+                        current_line = word + ' '
+                    else:
+                        current_line += word + ' '
+                if current_line:
+                    lines.append(current_line.strip())
+                wrapped_text = '\n'.join(lines)
+            dialogue_text.text = wrapped_text
+            
+            # Create choice buttons
+            start_y = 0.0
+            for idx, choice in enumerate(current.choices):
+                # Check if choice should be shown
+                if choice.requirement and not choice.requirement(player_stats):
+                    continue
+                    
+                btn = Button(parent=ui_root, text=f"{idx+1}. {choice.text}", 
+                           position=(-0.35, start_y - idx*0.12), scale=(0.7, 0.08))
+                
+                def make_choice_handler(choice_idx=idx):
+                    def handle():
+                        result = npc.process_choice(choice_idx, player_stats)
+                        hud_gold.text = f"Gold: {player_stats.gold}"  # update gold display
+                        
+                        if result == 'END':
+                            close_dialogue()
+                        elif result == 'combat_triggered':
+                            close_dialogue()
+                            # Trigger combat with hostile NPC
+                            start_npc_combat(npc)
+                        elif result != 'INVALID':
+                            update_dialogue()  # Continue conversation
+                    return handle
+                
+                btn.on_click = make_choice_handler()
+                choice_buttons.append(btn)
+        
+        def close_dialogue():
+            for btn in choice_buttons:
+                destroy(btn)
+            destroy(dialogue_text)
+            destroy(npc_name)
+            destroy(bg)
+            destroy(ui_root)
+            state['dialogue_ui'] = None
+            state['dialogue_close'] = None
+            mouse.locked = True
+            player.enabled = True
+        
+        # Initial dialogue setup
+        update_dialogue()
+        
+        # Lock controls
+        mouse.locked = False
+        player.enabled = False
+        
+        state['dialogue_ui'] = ui_root
+        state['dialogue_close'] = close_dialogue
+
+    # NPC Combat helper ---------------------------------------------- 
+    def start_npc_combat(npc: NPC):
+        """Start combat against a hostile NPC."""
+        from entities.enemy import Enemy
+        
+        def _combat_done():
+            state['combat_ui'] = None
+            print(f"Defeated {npc.name}!")
+            # Reward for defeating hostile NPC
+            reward = 15
+            player_stats.gold += reward
+            print(f"You earned {reward} gold!")
+        
+        # Create enemy stats based on NPC
+        if npc.npc_type == 'intruder':
+            npc_enemy = Enemy(npc.name, hp=70, attack=12, defense=2)
+        elif npc.npc_type == 'merchant':
+            npc_enemy = Enemy("Angry " + npc.name, hp=50, attack=8, defense=1)
+        else:  # quest_giver or other
+            npc_enemy = Enemy("Corrupted " + npc.name, hp=80, attack=10, defense=3)
+        
+        # Find the NPC's world position
+        npc_position = None
+        for npc_entity, npc_data in npcs:
+            if npc_data == npc:
+                npc_position = npc_entity.position
+                break
+        
+        # Start combat with the NPC as enemy at their location
+        combat_ui = CombatUI(world_player=player, player_stats=player_stats, on_finish=_combat_done, enemy_position=npc_position, enemy=npc_enemy)
+        
+        state['combat_ui'] = combat_ui
 
 
 # ---------------------------------------------------------------------------

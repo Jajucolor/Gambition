@@ -1,0 +1,13 @@
+# Gambition - 3D Card-based Combat RPG
+# Main dependencies for the game
+
+# 3D Game Engine - Used for the main 3D world and combat UI
+ursina>=6.0.0
+
+# 2D Game Engine - Used for alternative pygame implementation
+pygame>=2.5.0
+
+# Development and Testing
+# (Optional - uncomment if you want to include testing dependencies)
+# pytest>=7.0.0
+# pytest-cov>=4.0.0 
