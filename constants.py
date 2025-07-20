@@ -18,6 +18,10 @@ HAND_MULTIPLIERS = {
     'Four of a Kind': 16,
     'Straight Flush': 25,
     'Royal Flush': 50,
+    # New combinations
+    'Five of a Kind': 40,      # Very rare, high multiplier
+    'Flush House': 35,         # Full House + Flush combined
+    'Flush Five': 100,         # Extremely rare, highest multiplier
 }
 
 # Basic RGB color tuples

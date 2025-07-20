@@ -50,9 +50,24 @@ def setup_world():
     # Guild building
     guild_building = Entity(model='cube', color=color.dark_gray, scale=(4,4,4), position=(0,2,15), collider='box')
     market_building = Entity(model='cube', color=color.brown, scale=(4,4,4), position=(10,2,15), collider='box')
+    # Story HUD elements
+    story_hud = Text(parent=camera.ui, text="ACT I: THE ANTE | Find Chairman Valerius at Syndicate Plaza (North)", x=-0.8, y=0.4, scale=1, origin=(0,0), color=color.yellow)
+    
     guild_prompt = Text(parent=camera.ui, text="Press G to enter Guild", origin=(0,0), y=0.3, x=0, enabled=False)
     market_prompt = Text(parent=camera.ui, text="Press H to enter Market", origin=(0,0), y=0.25, x=0, enabled=False)
-    npc_prompt = Text(parent=camera.ui, text="Press T to talk", origin=(0,0), y=0.2, x=0, enabled=False)
+    npc_prompt = Text(parent=camera.ui, text="Press T to talk to Chairman Valerius", origin=(0,0), y=0.2, x=0, enabled=False)
+    
+    # Story introduction
+    story_intro = Text(
+        parent=camera.ui,
+        text="Welcome to Aethelburg, City of Fortune!\nYou are The Ace, a mysterious gambler seeking your mentor 'Maestro'.\nFind Chairman Valerius at Syndicate Plaza (North) to begin your story.",
+        origin=(0,0), y=0.0, x=0, enabled=True, scale=1.2, color=color.white
+    )
+    
+    # Hide intro after 10 seconds
+    def hide_intro():
+        story_intro.enabled = False
+    invoke(hide_intro, delay=10)
 
     # ------------------------------------------------------------------
     # Camera orbit parameters
@@ -91,13 +106,50 @@ def setup_world():
     #         player.position += move_dir
     #         player.look_at(player.position + move_dir)
 
-    # Ground and environment
-    Entity(model="plane", scale=100, texture="grass", collider="box")
-    Sky()
+    # Enhanced world with story districts
+    Entity(model="plane", scale=200, texture="grass", collider="box")
+    Sky(color=color.dark_gray)  # Darker sky for corrupted city
+    
+    # Create district portals (story areas)
+    districts = {}
+    
+    # Grand Terminal (starting area) - Orange (no collider - you can walk through)
+    districts['grand_terminal'] = Entity(model='cube', color=color.orange, scale=(8,4,8), position=(0,2,0))
+    Text(text="Grand Terminal", parent=districts['grand_terminal'], position=(0,3,0), scale=2, billboard=True, color=color.white)
+    
+    # Syndicate Plaza (main story) - Gold (no collider - you can walk through)
+    districts['syndicate_plaza'] = Entity(model='cube', color=color.gold, scale=(8,4,8), position=(0,2,25))
+    Text(text="Syndicate Plaza", parent=districts['syndicate_plaza'], position=(0,3,0), scale=2, billboard=True, color=color.white)
+    
+    # Casino District - Yellow (no collider - you can walk through)
+    districts['casino_district'] = Entity(model='cube', color=color.yellow, scale=(8,4,8), position=(30,2,15))
+    Text(text="Casino District", parent=districts['casino_district'], position=(0,3,0), scale=2, billboard=True, color=color.white)
+    
+    # The Underdeck (companions) - Cyan (no collider - you can walk through)
+    districts['underdeck'] = Entity(model='cube', color=color.cyan, scale=(8,2,8), position=(0,-1,-20))
+    Text(text="The Underdeck", parent=districts['underdeck'], position=(0,3,0), scale=2, billboard=True, color=color.white)
+    
+    # Story NPCs
+    # Chairman Valerius at Syndicate Plaza
+    valerius_npc = Entity(model='cube', color=color.magenta, scale=(2,4,2), position=(0,2,30), collider='box')
+    Text(text="Chairman Valerius", parent=valerius_npc, position=(0,3,0), scale=1.8, billboard=True, color=color.white)
+    
+    # Fortuna crystals (atmosphere)
+    for _ in range(15):
+        crystal_pos = (
+            random.uniform(-60, 60),
+            random.uniform(1, 4),
+            random.uniform(-60, 60)
+        )
+        Entity(model='cube', color=color.cyan, scale=(1, random.uniform(2, 6), 1), position=crystal_pos, rotation_y=random.uniform(0, 360))
 
     enemies: list[Entity] = []
-    for pos in [(5, 0.5, 5), (-8, 0.5, -3), (12, 0.5, -10)]:
-        cube = Entity(model="cube", color=color.red, scale=1, position=pos, collider="box")
+    # Spawn enemies near districts
+    enemy_positions = [(8, 0.5, 8), (-12, 0.5, -8), (18, 0.5, -15), (25, 0.5, 10), (-15, 0.5, 20)]
+    for pos in enemy_positions:
+        cube = Entity(model="cube", color=color.red, scale=(2,2,2), position=pos, collider="box")
+        cube.enemy_type = "Twisted Guard"
+        Text(text="Twisted Enemy", parent=cube, position=(0,2.5,0), scale=1.2, billboard=True, color=color.white)
         enemies.append(cube)
 
     # Fixed NPCs at specific locations
@@ -160,6 +212,9 @@ def setup_world():
         else:
             market_prompt.enabled = False
 
+        # Story NPC proximity check (Valerius)
+        valerius_nearby = distance(player.position, valerius_npc.position) < 8
+        
         # NPC proximity check
         closest_npc = None
         for npc_entity, npc_data in npcs:
@@ -167,9 +222,13 @@ def setup_world():
                 closest_npc = (npc_entity, npc_data)
                 break
         
-        if closest_npc and not any(state[k] for k in ['combat_ui', 'guild_ui', 'event_ui', 'inv_ui', 'shop_ui', 'dialogue_ui']):
+        # Show NPC prompt for either story NPC or regular NPCs
+        if (valerius_nearby or closest_npc) and not any(state[k] for k in ['combat_ui', 'guild_ui', 'event_ui', 'inv_ui', 'shop_ui', 'dialogue_ui']):
             npc_prompt.enabled = True
-            state['current_npc'] = closest_npc[1]
+            if closest_npc:
+                state['current_npc'] = closest_npc[1]
+            else:
+                state['current_npc'] = 'valerius'  # Story NPC
         else:
             npc_prompt.enabled = False
             state['current_npc'] = None
@@ -219,7 +278,10 @@ def setup_world():
         elif key == 'h' and distance(player.position, market_building.position) < 6:
             open_market_ui()
         elif key == 't' and state.get('current_npc'):
-            open_dialogue_ui(state['current_npc'])
+            if state['current_npc'] == 'valerius':
+                open_valerius_dialogue()
+            else:
+                open_dialogue_ui(state['current_npc'])
         elif key == 'v':  # event overlay
             open_event_ui()
         elif key == 'e':  # inventory
@@ -477,6 +539,67 @@ def setup_world():
         refresh()
         state['shop_ui'] = ui_root
         state['shop_close'] = close_market
+
+    # Story Dialogue UI ---------------------------------------------
+    def open_valerius_dialogue():
+        """Simple story dialogue with Chairman Valerius"""
+        ui_root = Entity(parent=camera.ui)
+        
+        # Background
+        bg = Panel(parent=ui_root, color=color.rgba(0,0,0,180), scale=(1.5,1.5))
+        
+        # NPC name
+        npc_name = Text(parent=ui_root, text="Chairman Valerius", y=0.42, scale=1.8, origin=(0,0), color=color.gold)
+        
+        # Dialogue text
+        dialogue_text = Text(
+            parent=ui_root, 
+            text="Ah, you must be the one who caused such a stir at the Grand Terminal.\nYour unique talents have not gone unnoticed. I am Chairman Valerius,\nand I believe you may be exactly what Aethelburg needs in these dark times.", 
+            y=0.15, x=-0.4, scale=1.1, origin=(0,0)
+        )
+        
+        # Response options
+        option1 = Button(parent=ui_root, text="Tell me about this 'Dissonance'", position=(-0.3, -0.1), scale=(0.6,0.08))
+        option2 = Button(parent=ui_root, text="I'm looking for someone called Maestro", position=(-0.3, -0.2), scale=(0.6,0.08))
+        option3 = Button(parent=ui_root, text="How can I help?", position=(-0.3, -0.3), scale=(0.6,0.08))
+        
+        def choice1():
+            story_hud.text = "ACT I: THE ANTE | Learned about the Dissonance plague"
+            print("STORY: You learned about the Fortuna Dissonance corrupting the city")
+            close_valerius_dialogue()
+        
+        def choice2():
+            story_hud.text = "ACT I: THE ANTE | Valerius claims Maestro disappeared"
+            print("STORY: Valerius says Maestro became obsessed with conspiracy theories")
+            close_valerius_dialogue()
+        
+        def choice3():
+            story_hud.text = "ACT I: THE ANTE | Accepted mission from Valerius"
+            print("STORY: Valerius wants you to find the 'Heart of Chaos' and purify it")
+            close_valerius_dialogue()
+        
+        option1.on_click = choice1
+        option2.on_click = choice2
+        option3.on_click = choice3
+        
+        def close_valerius_dialogue():
+            destroy(bg)
+            destroy(npc_name)
+            destroy(dialogue_text)
+            destroy(option1)
+            destroy(option2)
+            destroy(option3)
+            destroy(ui_root)
+            state['dialogue_ui'] = None
+            state['dialogue_close'] = None
+            mouse.locked = True
+            player.enabled = True
+        
+        # Lock controls
+        mouse.locked = False
+        player.enabled = False
+        state['dialogue_ui'] = ui_root
+        state['dialogue_close'] = close_valerius_dialogue
 
     # Dialogue UI ----------------------------------------------------
     def open_dialogue_ui(npc: NPC):

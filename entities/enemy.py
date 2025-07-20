@@ -1,3 +1,6 @@
+from status_effects import StatusEffectManager, StunEffect
+
+
 class Enemy:
     """Basic enemy with attack and optional defense."""
 
@@ -7,22 +10,46 @@ class Enemy:
         self.max_hp = hp
         self.attack_value = attack
         self.defense = defense
+        
+        # Status effects manager
+        self.status_effects: StatusEffectManager = StatusEffectManager()
 
     # ------------------------------------------------------------------
     # Combat behaviour
     # ------------------------------------------------------------------
     def take_damage(self, dmg: float) -> None:
-        actual = max(0, int(dmg) - self.defense)
-        self.hp = max(0, self.hp - actual)
-        print(f"{self.name} took {actual} damage. HP {self.hp}/{self.max_hp}")
+        # Apply status effect damage reduction and shields
+        actual_damage = self.status_effects.modify_incoming_damage(int(dmg))
+        actual_damage = max(0, actual_damage - self.defense)
+        self.hp = max(0, self.hp - actual_damage)
+        print(f"{self.name} took {actual_damage} damage. HP {self.hp}/{self.max_hp}")
 
-    def attack_player(self, player: 'Player') -> None:  # type: ignore
-        print(f"{self.name} attacks for {self.attack_value}!")
-        player.take_damage(self.attack_value)
+    def attack_player(self, player: 'Player') -> bool:  # type: ignore
+        """Attack the player. Returns True if attack was successful, False if stunned."""
+        # Check if stunned
+        if self.status_effects.has_effect(StunEffect):
+            print(f"{self.name} is stunned and cannot attack!")
+            return False
+        
+        # Apply damage buffs if any
+        damage = self.status_effects.modify_outgoing_damage(self.attack_value)
+        
+        print(f"{self.name} attacks for {damage}!")
+        player.take_damage(damage)
+        return True
+    
+    def start_turn(self) -> None:
+        """Called at the start of the enemy's turn to process status effects."""
+        self.status_effects.tick_effects(self)
+    
+    def end_turn(self) -> None:
+        """Called at the end of the enemy's turn."""
+        pass
 
     # Utility --------------------------------------------------------------
     def is_alive(self) -> bool:
         return self.hp > 0
+
 
 # ---------------------------------------------------------------------------
 # Enemy factory / catalogue

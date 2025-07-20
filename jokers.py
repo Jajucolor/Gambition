@@ -89,6 +89,25 @@ JOKER_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         'description': 'Lets you retrieve a card from the discard pile once per turn.',
         'effect': lambda hand, dmg, ht: dmg,  # active ability handled elsewhere
     },
+    # New jokers
+    'fortune_teller': {
+        'name': 'Fortune Teller',
+        'description': 'Increases all probability-based effects by 50%.',
+        'effect': lambda hand, dmg, ht: dmg,  # handled in card abilities
+        'chance_multiplier': 1.5,
+    },
+    'berserker': {
+        'name': 'Berserker',
+        'description': 'Damage increases by 2 each turn in combat.',
+        'effect': lambda hand, dmg, ht: dmg,  # handled in combat system
+        'damage_per_turn': 2,
+    },
+    'echo_mage': {
+        'name': 'Echo Mage',
+        'description': 'When you discard exactly one card, add a copy to your hand.',
+        'effect': lambda hand, dmg, ht: dmg,  # handled in discard system
+        'clone_on_single_discard': True,
+    },
     # More jokers can be added here
 }
 

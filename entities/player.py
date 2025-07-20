@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, TYPE_CHECKING
 
 from deck import Deck
 from card import Card
@@ -8,6 +8,10 @@ from constants import HAND_MULTIPLIERS
 from poker import get_poker_hand, hand_multiplier
 from jokers import apply_jokers
 from meta import load_meta  # local import to avoid circular in UI
+from status_effects import StatusEffectManager
+
+if TYPE_CHECKING:
+    from tarot import TarotCard
 
 
 class Player:
@@ -24,12 +28,22 @@ class Player:
         self.discard_pile: List[Card] = []
         self.hand: List[Card] = []
         self.hand_size: int = 8
+        
+        # Discard system
+        self.max_discards: int = 3
+        self.discards_left: int = self.max_discards
 
         # Jokers held represented by their type key (matching jokers.JOKER_DEFINITIONS)
         self.jokers: List[str] = []
 
         # Inventory of single-use Tarot cards or other consumables
-        self.items: List[object] = []  # use object to avoid import cycle for now
+        self.items: List['TarotCard'] = []
+        
+        # Status effects manager
+        self.status_effects: StatusEffectManager = StatusEffectManager()
+        
+        # Combat tracking
+        self.combat_turn: int = 0  # For Berserker joker
 
     # ------------------------------------------------------------------
     # Card management
@@ -48,39 +62,57 @@ class Player:
             extra = self.jokers.count('fool') * 1  # each Fool gives +1
             desired = self.hand_size + extra
             count = max(0, desired - len(self.hand))
-            if count == 0:
-                return  # already full
 
-        if count <= 0:
-            return
+        new_cards = self.deck.draw(count)
+        self.hand.extend(new_cards)
 
-        drawn = self.deck.draw(count)
-        self.hand.extend(drawn)
-        print(f"Player drew {len(drawn)} cards. Hand now: {self.hand}")
-
-    def discard_cards(self, indices: List[int]) -> None:
-        # Sort descending to avoid index shifts
-        indices = sorted(set(indices), reverse=True)
+    def discard_cards(self, indices: List[int]) -> List[Card]:
+        """Discard cards at given indices, return the discarded cards."""
+        if self.discards_left <= 0:
+            print("No discards remaining!")
+            return []
+        
+        if len(indices) == 0:
+            print("No cards selected for discard.")
+            return []
+        
+        self.discards_left -= 1
         discarded = []
-        for idx in indices:
+        for idx in sorted(indices, reverse=True):
             if 0 <= idx < len(self.hand):
-                discarded.append(self.hand.pop(idx))
-        self.discard_pile.extend(discarded)
-        print(f"Discarded {len(discarded)} cards → {discarded}")
+                card = self.hand.pop(idx)
+                self.discard_pile.append(card)
+                discarded.append(card)
+        
+        # Echo Mage joker: if discarding exactly one card, add a copy to hand
+        if len(discarded) == 1 and 'echo_mage' in self.jokers:
+            cloned_card = discarded[0]  # Create a reference to the same card
+            self.hand.append(cloned_card)
+            print(f"Echo Mage cloned {cloned_card}!")
+            # Refill hand with one less card since we added a clone
+            self.draw_cards(len(discarded) - 1)
+        else:
+            # Refill hand normally
+            self.draw_cards(len(discarded))
+        
+        print(f"Discarded {len(discarded)} card(s). {self.discards_left} discards left.")
+        return discarded
 
-        # Draw replacements
-        self.draw_cards(len(discarded))
+    def reset_discards(self) -> None:
+        """Reset discards for a new combat."""
+        self.discards_left = self.max_discards
 
     # ------------------------------------------------------------------
     # Combat actions
     # ------------------------------------------------------------------
-    def form_hand_and_attack(self, indices: List[int]) -> tuple[float, str | None]:
+    def form_hand_and_attack(self, indices: List[int], enemy=None) -> tuple[float, str | None, List[str]]:
+        """Form a hand and attack, applying card abilities. Returns (damage, hand_type, effects)."""
         if not indices:
             print("No cards selected.")
-            return 0.0, None
+            return 0.0, None, []
         if any(i >= len(self.hand) or i < 0 for i in indices):
             print("Invalid card index in selection.")
-            return 0.0, None
+            return 0.0, None, []
 
         selected = [self.hand[i] for i in indices]
         if len(indices) == 5:
@@ -112,7 +144,28 @@ class Player:
             mult = HAND_MULTIPLIERS.get(hand_type, 1)
 
         base_damage = sum(card.value for card in selected) * mult
+        
+        # Apply joker effects
         total_damage = apply_jokers(selected, base_damage, hand_type, self.jokers)
+        
+        # Apply Berserker joker damage bonus
+        if 'berserker' in self.jokers:
+            berserker_bonus = self.combat_turn * 2  # +2 damage per turn
+            total_damage += berserker_bonus
+            if berserker_bonus > 0:
+                print(f"Berserker bonus: +{berserker_bonus} damage!")
+        
+        # Apply status effect damage buffs
+        total_damage = self.status_effects.modify_outgoing_damage(int(total_damage))
+        
+        # Apply card combination abilities
+        abilities_result = {"effects": [], "damage_multiplier": 1.0}
+        if enemy and hand_type != "Strike":
+            from card_abilities import apply_card_combination_abilities
+            abilities_result = apply_card_combination_abilities(hand_type, self, enemy, int(base_damage))
+        
+        # Apply damage multiplier from abilities
+        total_damage = int(total_damage * abilities_result["damage_multiplier"])
 
         # Remove played cards from hand to discard pile
         for idx in sorted(indices, reverse=True):
@@ -122,14 +175,36 @@ class Player:
         self.draw_cards(len(indices))
 
         print(f"Attack using {len(selected)} card(s) as {hand_type}: base {base_damage} → total {total_damage}")
-        return total_damage, hand_type
+        return float(total_damage), hand_type, abilities_result["effects"]
 
     # ------------------------------------------------------------------
     # Stat adjustments
     # ------------------------------------------------------------------
     def take_damage(self, dmg: float) -> None:
-        self.hp = max(0, self.hp - int(dmg))
-        print(f"Player took {dmg} damage. HP {self.hp}/{self.max_hp}")
+        # Apply status effect damage reduction and shields
+        actual_damage = self.status_effects.modify_incoming_damage(int(dmg))
+        self.hp = max(0, self.hp - actual_damage)
+        print(f"Player took {actual_damage} damage. HP {self.hp}/{self.max_hp}")
+    
+    def start_turn(self) -> None:
+        """Called at the start of the player's turn to process status effects."""
+        self.combat_turn += 1
+        self.status_effects.tick_effects(self)
+    
+    def end_turn(self) -> None:
+        """Called at the end of the player's turn."""
+        pass
+    
+    def start_combat(self) -> None:
+        """Called when combat begins."""
+        self.combat_turn = 0
+        self.reset_discards()
+        self.status_effects.clear_all_effects()
+    
+    def end_combat(self) -> None:
+        """Called when combat ends."""
+        self.combat_turn = 0
+        self.status_effects.clear_all_effects()
 
     def add_joker(self, jtype: str) -> None:
         if len(self.jokers) >= 5:
@@ -149,7 +224,7 @@ class Player:
     # ------------------------------------------------------------------
     # Item management
     # ------------------------------------------------------------------
-    def add_item(self, item: object) -> None:
+    def add_item(self, item: 'TarotCard') -> None:
         """Add a consumable (e.g., TarotCard) to inventory."""
         self.items.append(item)
         print(f"Obtained item: {item}")

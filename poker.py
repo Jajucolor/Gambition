@@ -35,10 +35,27 @@ def get_poker_hand(cards: List[Card]) -> Tuple[str, List[int]]:
 
     counts = sorted(rank_counts.values(), reverse=True)
 
+    # New combinations first (highest priority)
+    if counts == [5]:  # Five of a Kind
+        return "Five of a Kind", values
+    
+    # Check for Flush Five (5 cards same rank and suit)
+    if counts == [5] and is_flush:
+        return "Flush Five", values
+    
+    # Check for Royal Flush
+    if is_straight and is_flush and values == [10, 11, 12, 13, 14]:
+        return "Royal Flush", values
+    
+    # Check for Straight Flush
     if is_straight and is_flush:
-        if values == [10, 11, 12, 13, 14]:
-            return "Royal Flush", values
         return "Straight Flush", values
+    
+    # Check for Flush House (Full House + Flush)
+    if counts == [3, 2] and is_flush:
+        return "Flush House", values
+    
+    # Standard combinations
     if counts == [4, 1]:
         return "Four of a Kind", values
     if counts == [3, 2]:
