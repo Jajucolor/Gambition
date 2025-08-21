@@ -24,6 +24,16 @@ class Player:
         self.hp: int = self.max_hp
         self.gold: int = 20
 
+        # Progression
+        self.level: int = 1
+        self.exp: int = 0
+        self.exp_to_next: int = 100
+        self.skill_points: int = 0
+        self.permanent_damage_multiplier: float = 1.0
+        self.abilities_unlocked: bool = True
+        self.activated_checkpoints: list[tuple[float, float, float]] = []
+        self.respawn_position: tuple[float, float, float] | None = None
+
         self.deck: Deck = Deck()
         self.discard_pile: List[Card] = []
         self.hand: List[Card] = []
@@ -35,6 +45,7 @@ class Player:
 
         # Jokers held represented by their type key (matching jokers.JOKER_DEFINITIONS)
         self.jokers: List[str] = []
+        self.max_jokers: int = 5
 
         # Inventory of single-use Tarot cards or other consumables
         self.items: List['TarotCard'] = []
@@ -44,6 +55,9 @@ class Player:
         
         # Combat tracking
         self.combat_turn: int = 0  # For Berserker joker
+        self.executioner_required_hand: str | None = None
+        self.executioner_percent: float = 0.2
+        self.beggar_fights_remaining: int | None = None
 
     # ------------------------------------------------------------------
     # Card management
@@ -63,6 +77,10 @@ class Player:
             desired = self.hand_size + extra
             count = max(0, desired - len(self.hand))
 
+        # Shuffle deck before drawing for combat randomness
+        if count > 0:
+            self.deck.shuffle()
+        
         new_cards = self.deck.draw(count)
         self.hand.extend(new_cards)
 
@@ -97,10 +115,39 @@ class Player:
         
         print(f"Discarded {len(discarded)} card(s). {self.discards_left} discards left.")
         return discarded
-
+    
+    def refresh_deck(self) -> None:
+        """Refresh the deck by adding all discarded cards back and shuffling."""
+        if self.discard_pile:
+            self.deck.refresh_from_discard(self.discard_pile)
+            print("Your deck has been refreshed!")
+    
     def reset_discards(self) -> None:
-        """Reset discards for a new combat."""
+        """Reset the discard count for a new combat."""
         self.discards_left = self.max_discards
+    
+    def sort_deck(self) -> None:
+        """Sort the deck cards by suit (Clubs, Diamonds, Hearts, Spades) then by rank"""
+        # Define suit order: Clubs, Diamonds, Hearts, Spades
+        suit_order = {'♣': 0, 'Clubs': 0, '♦': 1, 'Diamonds': 1, 
+                     '♥': 2, 'Hearts': 2, '♠': 3, 'Spades': 3}
+        
+        # Define rank order using CARD_VALUES from constants
+        from constants import CARD_VALUES
+        
+        def card_sort_key(card):
+            # Get suit priority (0-3)
+            suit_priority = suit_order.get(card.suit, 999)  # 999 for unknown suits
+            # Get rank priority (2-14)
+            rank_priority = CARD_VALUES.get(card.rank, 0)
+            return (suit_priority, rank_priority)
+        
+        self.deck.cards.sort(key=card_sort_key)
+    
+    def add_card_to_deck(self, card: Card) -> None:
+        """Add a card to the deck and maintain sorted order"""
+        self.deck.cards.append(card)
+        self.sort_deck()
 
     # ------------------------------------------------------------------
     # Combat actions
@@ -138,6 +185,8 @@ class Player:
                 hand_type = "Two Pair"
             elif counts == [2, 1] or counts == [2]:
                 hand_type = "Pair"
+            elif len(selected) == 1 or counts == [1]:
+                hand_type = "High Card"
             else:
                 hand_type = "Strike"
 
@@ -154,18 +203,34 @@ class Player:
             total_damage += berserker_bonus
             if berserker_bonus > 0:
                 print(f"Berserker bonus: +{berserker_bonus} damage!")
+
+        # Shaman joker: multiplier per tarot card held
+        if 'shaman' in self.jokers:
+            per_item_bonus = 0.05  # +5% per tarot card
+            multiplier = 1.0 + per_item_bonus * len(self.items)
+            total_damage = int(total_damage * multiplier)
         
         # Apply status effect damage buffs
         total_damage = self.status_effects.modify_outgoing_damage(int(total_damage))
         
         # Apply card combination abilities
         abilities_result = {"effects": [], "damage_multiplier": 1.0}
-        if enemy and hand_type != "Strike":
+        if enemy and hand_type != "Strike" and getattr(self, 'abilities_unlocked', True):
             from card_abilities import apply_card_combination_abilities
             abilities_result = apply_card_combination_abilities(hand_type, self, enemy, int(base_damage))
+
+        # Executioner joker: percent of current enemy HP if correct hand played
+        if enemy and 'executioner' in self.jokers and self.executioner_required_hand:
+            if hand_type == self.executioner_required_hand:
+                bonus = int(getattr(enemy, 'hp', 0) * self.executioner_percent)
+                total_damage += bonus
+                abilities_result["effects"].append(f"Executioner bonus: +{bonus} current HP damage")
         
         # Apply damage multiplier from abilities
         total_damage = int(total_damage * abilities_result["damage_multiplier"])
+
+        # Apply permanent damage multiplier (e.g., Beggar reveal)
+        total_damage = int(total_damage * self.permanent_damage_multiplier)
 
         # Remove played cards from hand to discard pile
         for idx in sorted(indices, reverse=True):
@@ -185,6 +250,25 @@ class Player:
         actual_damage = self.status_effects.modify_incoming_damage(int(dmg))
         self.hp = max(0, self.hp - actual_damage)
         print(f"Player took {actual_damage} damage. HP {self.hp}/{self.max_hp}")
+
+    # ------------------------------------------------------------------
+    # Progression
+    # ------------------------------------------------------------------
+    def add_exp(self, amount: int) -> None:
+        self.exp += amount
+        while self.exp >= self.exp_to_next:
+            self.exp -= self.exp_to_next
+            self.level_up()
+
+    def level_up(self) -> None:
+        self.level += 1
+        self.skill_points += 1
+        # Auto HP increase
+        self.max_hp += 5
+        self.hp = self.max_hp
+        # Next level harder
+        self.exp_to_next = int(self.exp_to_next * 1.2)
+        print(f"Leveled up to {self.level}! Skill points: {self.skill_points}. Max HP is now {self.max_hp}.")
     
     def start_turn(self) -> None:
         """Called at the start of the player's turn to process status effects."""
@@ -200,6 +284,13 @@ class Player:
         self.combat_turn = 0
         self.reset_discards()
         self.status_effects.clear_all_effects()
+        # Pick required hand for Executioner joker
+        import random
+        hands = [
+            "High Card", "Pair", "Two Pair", "Three of a Kind", "Straight",
+            "Flush", "Full House", "Four of a Kind", "Straight Flush", "Royal Flush"
+        ]
+        self.executioner_required_hand = random.choice(hands)
     
     def end_combat(self) -> None:
         """Called when combat ends."""
@@ -207,7 +298,7 @@ class Player:
         self.status_effects.clear_all_effects()
 
     def add_joker(self, jtype: str) -> None:
-        if len(self.jokers) >= 5:
+        if len(self.jokers) >= self.max_jokers:
             print("Cannot recruit more companions - maximum of 5 companions allowed!")
             return
         self.jokers.append(jtype)

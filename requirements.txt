@@ -1,13 +1,32 @@
-# Gambition - 3D Card-based Combat RPG
-# Main dependencies for the game
+# Gambition - A Tale of Fortuna
+# Requirements for the complete narrative-driven RPG
 
-# 3D Game Engine - Used for the main 3D world and combat UI
-ursina>=6.0.0
+# Core game engine
+ursina>=5.0.0
 
-# 2D Game Engine - Used for alternative pygame implementation
-pygame>=2.5.0
+# Data structures and type hints
+dataclasses>=0.6
+typing-extensions>=4.0.0
 
-# Development and Testing
-# (Optional - uncomment if you want to include testing dependencies)
-# pytest>=7.0.0
-# pytest-cov>=4.0.0 
+# Random number generation (included with Python)
+# random
+# math
+
+# File I/O and JSON handling (included with Python)
+# json
+# os
+# sys
+
+# Optional: Enhanced graphics and effects
+# These are optional but recommended for the full experience
+# pygame>=2.0.0  # For enhanced audio support
+# numpy>=1.20.0  # For advanced math operations
+pillow>=8.0.0  # For image processing and texture creation
+
+# Development and testing (optional)
+# pytest>=6.0.0  # For running tests
+# black>=21.0.0  # For code formatting
+# mypy>=0.900  # For type checking
+
+# Note: Most dependencies are included with Python standard library
+# The main external dependency is Ursina for the 3D game engine 

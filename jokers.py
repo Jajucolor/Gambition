@@ -108,6 +108,36 @@ JOKER_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         'effect': lambda hand, dmg, ht: dmg,  # handled in discard system
         'clone_on_single_discard': True,
     },
+    # Requested new companions
+    'executive': {
+        'name': 'The Executive',
+        'description': 'Grants bonus gold when an enemy is defeated.',
+        'effect': lambda hand, dmg, ht: dmg,  # handled post-combat
+        'gold_bonus_factor': 0.5,
+    },
+    'shaman': {
+        'name': 'The Shaman',
+        'description': 'Increases damage by 5% per Tarot card held.',
+        'effect': lambda hand, dmg, ht: dmg,  # handled during attack
+        'per_tarot_bonus': 0.05,
+    },
+    'executioner': {
+        'name': 'The Executioner',
+        'description': 'Deals bonus damage equal to a percent of enemy current HP if a required hand is played.',
+        'effect': lambda hand, dmg, ht: dmg,  # handled during attack
+        'percent': 0.2,
+    },
+    'explorer': {
+        'name': 'The Explorer',
+        'description': 'Chance to find a random tarot card or normal card after each victory.',
+        'effect': lambda hand, dmg, ht: dmg,  # handled post-combat
+        'find_chance': 0.3,
+    },
+    'beggar': {
+        'name': 'The Beggar',
+        'description': 'Takes your gold after each victory for 5 fights, then disappears revealing +50% permanent damage.',
+        'effect': lambda hand, dmg, ht: dmg,  # handled post-combat
+    },
     # More jokers can be added here
 }
 

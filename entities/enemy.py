@@ -56,12 +56,12 @@ class Enemy:
 # ---------------------------------------------------------------------------
 
 ENEMY_TEMPLATES = {
-    'Goblin': dict(hp=50, attack=10, defense=0),
-    'Orc': dict(hp=80, attack=12, defense=2),
-    'Skeleton': dict(hp=40, attack=8, defense=1),
-    'Bandit': dict(hp=60, attack=15, defense=0),
-    'Troll': dict(hp=120, attack=18, defense=4),
-    'Dragonling': dict(hp=150, attack=25, defense=5),
+    'Twisted Guard': dict(hp=50, attack=10, defense=0),
+    'Twisted Sentinel': dict(hp=80, attack=12, defense=2),
+    'Twisted Scout': dict(hp=40, attack=8, defense=1),
+    'Twisted Warrior': dict(hp=60, attack=15, defense=0),
+    'Twisted Brute': dict(hp=120, attack=18, defense=4),
+    'Twisted Commander': dict(hp=150, attack=25, defense=5),
 }
 
 def create_enemy(name: str) -> 'Enemy':

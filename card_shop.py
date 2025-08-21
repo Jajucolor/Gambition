@@ -50,7 +50,7 @@ def generate_shop_offers() -> List[ShopOffer]:
     for _ in range(3):
         card_obj = _random_card()
         def _make_fn(c: Card):
-            return lambda p: p.deck.cards.append(c)
+            return lambda p: p.add_card_to_deck(c)
         offers.append(ShopOffer(card_obj, cost=3, on_buy=_make_fn(card_obj)))
 
     # Two random tarot cards (expensive)

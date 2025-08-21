@@ -1,9 +1,12 @@
 from ursina import *  # type: ignore
 from typing import Any, cast
+import math
 
 from entities.player import Player
 from encounter import EncounterManager
 from entities.enemy import Enemy
+from texture_manager import apply_card_texture, apply_character_texture
+from direct.actor.Actor import Actor 
 
 # Overlay sizes (viewport units −1..1)
 CARD_W, CARD_H = .12, .18  # smaller cards
@@ -18,7 +21,7 @@ _fmt = lambda v: int(v)
 class CombatUI(Entity):
     """3-D battle overlay reusing core logic and showing detailed stats."""
 
-    def __init__(self, *, world_player: Entity, player_stats: Player, on_finish, enemy_position=None, enemy=None):
+    def __init__(self, *, world_player: Entity, player_stats: Player, on_finish, enemy_position=None, enemy=None, approach_dir: Any | None = None):
         super().__init__()
         self.world_player = world_player
         self.on_finish = on_finish
@@ -42,12 +45,15 @@ class CombatUI(Entity):
         self.last_damage_taken = 0
         self.last_hand: str = ''
 
-        # Discard limit per turn
-        self.max_discards = 4
+        # Discard limit per turn - use player's actual max_discards
+        self.max_discards = getattr(self.player, 'max_discards', 4)
         self.discards_left = self.max_discards
 
         # Flag to block inputs during enemy wind-up
         self.in_enemy_phase: bool = False
+
+        # Approach direction from world encounter (unit Vec3 on XZ plane)
+        self.approach_dir = approach_dir
 
         # Build scene & UI
         self.lock_world()
@@ -73,19 +79,89 @@ class CombatUI(Entity):
         if enemy_position:
             # Position combat around the enemy's location
             enemy_pos = Vec3(enemy_position)
-            player_pos = enemy_pos + Vec3(-5, 0, 0)  # Player to the left of enemy
-            camera_pos = enemy_pos + Vec3(-6, 0, -5)   # Camera above and back
+
+            # Determine approach direction (from player -> enemy) on XZ plane
+            dir_vec = None
+            if self.approach_dir is not None:
+                try:
+                    dv = Vec3(self.approach_dir)
+                    dv = Vec3(dv.x, 0, dv.z)
+                    if dv.length() > 0:
+                        dir_vec = dv.normalized()
+                except Exception:
+                    dir_vec = None
+            if dir_vec is None:
+                # Fallback to compute from world player position
+                try:
+                    wp = Vec3(self.world_player.position)
+                    dv2 = Vec3(enemy_pos.x - wp.x, 0, enemy_pos.z - wp.z)
+                    dir_vec = dv2.normalized() if dv2.length() > 0 else Vec3(0, 0, 1)
+                except Exception:
+                    dir_vec = Vec3(0, 0, 1)
+
+            # Place player opposite the approach direction, at a fixed distance
+            player_distance = 15.0
+            player_pos = enemy_pos - dir_vec * player_distance
+
+            # Compute a side vector (perpendicular on XZ plane)
+            side_vec = Vec3(dir_vec.z, 0, -dir_vec.x)
+
+            # Camera slightly behind and to the side of the player, looking at enemy
+            camera_pos = player_pos - dir_vec * 4 + side_vec * -3 + Vec3(0, 2, 0)
             
-            self.player_model = Entity(model='cube', color=cast(Any, color.azure), position=player_pos, scale=1.5)
+            # self.player_model = Entity(model='assets/3.glb', position=player_pos, scale=1.5)
+            self.model_holder = Entity(position=player_pos, scale=1.5, rotation_y = -90)
+
+            # Load Panda3D Actor and parent it to the holder
+            self.player_model = Actor("assets/3.glb")
+            self.player_model.reparent_to(self.model_holder)
             self.enemy_model = Entity(model='cube', color=cast(Any, color.red), position=enemy_pos, scale=1.5)
+            
+            # Apply textures to character models
+            apply_character_texture(self.player_model, 'player')
+            apply_character_texture(self.enemy_model, 'enemy')
+            
+            # Orient models to face each other using yaw only
+            try:
+                def yaw_from_dir(v: Vec3) -> float:
+                    return math.degrees(math.atan2(v.x, v.z))
+
+                player_yaw = yaw_from_dir(dir_vec)
+                # Adjust for model forward axis alignment via holder offset (-90)
+                self.model_holder.rotation_y = player_yaw - 180
+
+                enemy_yaw = yaw_from_dir(Vec3(-dir_vec.x, 0, -dir_vec.z))
+                self.enemy_model.rotation_y = enemy_yaw
+            except Exception:
+                pass
+
             camera.position = camera_pos
-            camera.look_at(enemy_pos + Vec3(4, 1, 10))
+            camera.look_at(enemy_pos + Vec3(0, 0, 0))
+            camera.rotation_z = -1  # small stylistic tilt
         else:
             # Default positions for random encounters
             self.player_model = Entity(model='cube', color=cast(Any, color.azure), position=(-2, 0.75, 4), scale=1.5)
             self.enemy_model = Entity(model='cube', color=cast(Any, color.red), position=(2, 0.75, 4), scale=1.5)
+            
+            # Apply textures to character models
+            apply_character_texture(self.player_model, 'player')
+            apply_character_texture(self.enemy_model, 'enemy')
+            
+            # Face each other in default layout
+            try:
+                pv = Vec3(self.enemy_model.position.x - self.player_model.position.x, 0, self.enemy_model.position.z - self.player_model.position.z).normalized()
+                pyaw = -math.degrees(math.atan2(pv.x, pv.z))
+                self.player_model.rotation_y = pyaw
+
+                ev = Vec3(-pv.x, 0, -pv.z)
+                eyaw = -math.degrees(math.atan2(ev.x, ev.z))
+                self.enemy_model.rotation_y = eyaw
+            except Exception:
+                pass
+
             camera.position = (0, 3, 7)
-            camera.look_at(Vec3(-3, 1, 10))
+            camera.look_at(Vec3(0, 0, 0))
+            camera.rotation_z = -1  # tilt left by 30 degrees
 
     # ------------------------------------------------------------------
     # UI
@@ -118,6 +194,9 @@ class CombatUI(Entity):
             btn = Button(parent=self.ui_root, text=f'{card.rank}{card.suit[0]}', color=cast(Any, color.gray),
                          position=(x, -0.3), scale=(CARD_W, CARD_H))
             btn.card_index = idx  # type: ignore
+            
+            # Apply card texture
+            apply_card_texture(btn, card)
 
             def _on_click(btn=btn):
                 ci = btn.card_index  # type: ignore
@@ -254,7 +333,7 @@ class CombatUI(Entity):
     def attack_selected(self):
         if not self.selected:
             return
-        dmg, hand_type = self.player.form_hand_and_attack(self.selected)
+        dmg, hand_type, effects = self.player.form_hand_and_attack(self.selected, enemy=self.enemy)
         bonus = getattr(self, '_tarot_bonus', 0)
         if bonus:
             dmg += bonus
@@ -264,6 +343,9 @@ class CombatUI(Entity):
             self.last_damage_dealt = _fmt(dmg)
             self.last_hand = hand_type
             self.last_damage_taken = 0
+            # Show effects summary if any
+            if effects:
+                self.txt_last.text = f"{hand_type}: {', '.join(effects)}"
         self.selected.clear()
         self._refresh_hand_ui()
         if self.enemy and not self.enemy.is_alive():
@@ -277,10 +359,16 @@ class CombatUI(Entity):
         if self.discards_left <= 0:
             print('No discards left!')
             return
-        self.player.discard_cards(self.selected)
-        self.selected.clear()
-        self.discards_left -= 1
-        self._refresh_hand_ui()
+        
+        # Convert selected indices to actual cards and discard them
+        discarded = self.player.discard_cards(self.selected)
+        if discarded:
+            print(f"Discarded {len(discarded)} card(s). {self.player.discards_left} discards left.")
+            self.discards_left = self.player.discards_left  # Sync with player's discard count
+            self.selected.clear()
+            self._refresh_hand_ui()
+        else:
+            print("Failed to discard cards.")
 
     def end_turn(self):
         self.selected.clear()
@@ -331,8 +419,41 @@ class CombatUI(Entity):
         self.status_text.text = 'Victory!' if player_won else 'Defeat…'
         invoke(self._cleanup, delay=1.5)
 
+        # Reward coins (Executive bonus)
+        reward = random.randint(8, 15)
+        if 'executive' in self.player.jokers:
+            reward = int(reward * 1.5)
+        self.player.gold += reward
+        print(f"You earned {reward} gold!")
+
+        # Award EXP and level up handling
+        exp_gain = random.randint(15, 30)
+        if hasattr(self.player, 'add_exp'):
+            self.player.add_exp(exp_gain)
+        print(f"Gained {exp_gain} EXP.")
+        
+        # Refresh deck and reset discards after combat
+        if player_won:
+            self.player.refresh_deck()
+        self.player.reset_discards()
+
     def _cleanup(self):
-        destroy(self.player_model)
+        # Panda3D Actor needs Panda cleanup; Ursina Entity can be destroyed
+        try:
+            from direct.actor.Actor import Actor  # type: ignore
+            if isinstance(self.player_model, Actor):
+                self.player_model.cleanup()
+                self.player_model.removeNode()
+            else:
+                destroy(self.player_model)
+        except Exception:
+            # Fallback to Ursina destroy if type check/import fails
+            destroy(self.player_model)
+
+        # Destroy holder if it exists (only present when using Actor)
+        if hasattr(self, 'model_holder') and self.model_holder is not None:
+            destroy(self.model_holder)
+
         destroy(self.enemy_model)
         destroy(self.ui_root)
         destroy(self.action_panel)

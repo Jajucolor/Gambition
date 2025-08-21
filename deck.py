@@ -31,6 +31,14 @@ class Deck:
         drawn = self.cards[-actual:]
         self.cards = self.cards[:-actual]
         return drawn
+    
+    def refresh_from_discard(self, discard_pile: List[Card]) -> None:
+        """Refresh the deck by adding all cards from the discard pile back and shuffling."""
+        if discard_pile:
+            self.cards.extend(discard_pile)
+            discard_pile.clear()
+            self.shuffle()
+            print(f"Deck refreshed with {len(self.cards)} cards")
 
     # ------------------------------------------------------------------
     # Utility dunder methods

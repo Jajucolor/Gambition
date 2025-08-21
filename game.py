@@ -14,7 +14,7 @@ from poker import get_poker_hand
 from encounter import EncounterManager
 from meta import load_meta, save_meta, record_run, add_permanent_hp
 from shop import open_shop
-from event_system import random_event
+
 
 
 def choose_indices(prompt: str, hand_len: int, expect: int | None = None) -> List[int]:
@@ -107,7 +107,7 @@ def play_game() -> None:
                 if roll < 0.5:
                     open_shop(player)
                 else:
-                    random_event().trigger(player)
+                    print("You explore the area but find nothing of interest.")
                 continue
             else:
                 break
